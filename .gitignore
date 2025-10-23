@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+
+# Virtual environment
+.venv/
+
+# Data
+*.csv
+*.parquet
+*.db
+
+# Editor & OS
+.vscode/
+.idea/
+.DS_Store
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# uv / poetry
+.uv/
