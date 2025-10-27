@@ -12,6 +12,7 @@ dependencies = [
     "patsy>=1.0.2",
     "polars>=1.34.0",
     "pyarrow>=21.0.0",
+    "pytensor>=2.35.1",
     "scipy>=1.16.2",
     "statsmodels>=0.14.5",
 ]
