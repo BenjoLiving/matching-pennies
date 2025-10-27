@@ -33,8 +33,14 @@ m = tdf[:, model_cols]
 m = m.filter(pl.col("EFS_before_flg").is_not_null())
 m= m.drop_nulls()
 
-# Standardize columns
-"""TODO"""
+# Scale both columns in place
+m = m.with_columns([
+    ((pl.col("trial_idx") - pl.col("trial_idx").min()) / 
+     (pl.col("trial_idx").max() - pl.col("trial_idx").min())).alias("trial_idx_scaled"),
+
+    ((pl.col("session_idx") - pl.col("session_idx").min()) / 
+     (pl.col("session_idx").max() - pl.col("session_idx").min())).alias("session_idx_scaled")
+])
 
 # Suppose df is a pandas DataFrame with columns:
 df = m.to_pandas()
@@ -45,7 +51,7 @@ import bambi as bmb
 # categorical vars can stay as string/object; bambi will encode them
 
 model = bmb.Model(
-    "EFS_before_flg ~ treatment*trial_idx + treatment*session_idx + (1|animal_id)",
+    "EFS_before_flg ~ treatment*trial_idx_scaled + treatment*session_idx_scaled + (1|animal_id)",
     df,
     family="bernoulli",  # logistic link by default
 )
