@@ -11,12 +11,48 @@ TODO:
 """
 
 # Load data and compute metrics 
-directory = "C:/Users/benli/Documents/PaperManuscripts_andProjects/_2018_ACC_hallway/Matching Pennies/Testing/"
-tmap = "C:/Users/benli/Documents/PaperManuscripts_andProjects/_2018_ACC_hallway/Matching Pennies/2018_acc_treatment_map.csv"
+directory = "/Users/ben/Documents/Data/lesion_study/post_sx_testing/reorganized/normal_mp"
+tmap = "/Users/ben/Documents/Data/lesion_study/post_sx_testing/reorganized/lesion_study_ingestion_map.csv"
 
 csvs = csv_parser.get_csv_files(directory, recursive=True)
 df = csv_parser.build_trials(csvs, tmap, paradigm="normal")   
 
 tdf, sdf = cpm.compute_metrics(df, keys=["animal_id", "session_idx"])
 
-print(tdf.head())
+model_cols = [
+    "EFS_before_flg",
+    "treatment",
+    "trial_idx",
+    "session_idx",
+    "animal_id",
+]
+
+m = tdf[:, model_cols]
+
+# Remove nan columns
+m = m.filter(pl.col("EFS_before_flg").is_not_null())
+m= m.drop_nulls()
+
+# Standardize columns
+"""TODO"""
+
+# Suppose df is a pandas DataFrame with columns:
+df = m.to_pandas()
+
+import bambi as bmb
+
+# make sure df is a pandas DataFrame
+# categorical vars can stay as string/object; bambi will encode them
+
+model = bmb.Model(
+    "EFS_before_flg ~ treatment*trial_idx + treatment*session_idx + (1|animal_id)",
+    df,
+    family="bernoulli",  # logistic link by default
+)
+
+idata = model.fit()  # runs MCMC (NUTS)
+print(bmb.summary(idata))
+
+import arviz as az 
+ppc = model.predict(idata, kind="response")
+az.plot_ppc(ppc)
