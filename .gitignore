@@ -12,6 +12,10 @@ __pycache__/
 *.csv
 *.parquet
 *.db
+data/*
+!data/README.md
+experiments/*
+!experiments/skeleton.toml
 
 # Editor & OS
 .vscode/

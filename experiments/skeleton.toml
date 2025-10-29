@@ -1,0 +1,15 @@
+# High-level experiment metadata
+name = ""
+good_lesions = []   # strings in the form "P1234"
+
+# This is the ingestion map CSV you already have that links session files to metadata
+treatment_map = ""  # Path to treatment_map
+
+# Each paradigm under this experiment
+[[paradigm]]
+name = ""
+directory = ""  # Path to session data 
+paradigm_label = ""  # what you pass to csv_parser.build_trials(..., paradigm=...)
+enabled = true
+
+# Repeat [[paradigm]] block as necessary

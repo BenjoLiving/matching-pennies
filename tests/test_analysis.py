@@ -19,7 +19,6 @@ TODO:
 - Make sure python computed metrics are the same as matlab computed metrics
 - Add response time
 - Add time in well
-- Add WSLS with no multi-well response. 
 """
 
 # Test to make sure this version matches MATLAB version
