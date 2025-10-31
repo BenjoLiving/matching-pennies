@@ -5,6 +5,9 @@ import bambi as bmb
 import arviz as az 
 import pymc as pm
 import matplotlib.pyplot as plt 
+import altair as alt
+from scipy.ndimage import gaussian_filter1d
+from IPython.display import display
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from matching_pennies.io.metrics_store import load_metrics
@@ -18,10 +21,64 @@ tdf, sdf, manifest = load_metrics(EXPERIMENT, PARADIGM)
 # =========================================
 # First session analysis
 # =========================================
-
 tdf_ses1 = tdf.filter(
     pl.col("session_idx") == 1
 )
+
+# =========================================
+# Basic Plots 
+# =========================================
+# Get trial number per session
+max_trials = (
+    tdf_ses1
+    .group_by(["animal_id", "session_idx"])
+    .agg(pl.col("trial_idx").max().alias("max_trial"))
+)
+
+# Find minimum session length
+min_trial = max_trials["max_trial"].min()
+
+# Truncate df to min session length 
+tdf_trunc = tdf_ses1.filter(pl.col("trial_idx") <= min_trial)
+
+# Get mean EFS per treatment per trial
+efs_by_trt_trial = (
+    tdf_trunc
+    .select("treatment", "trial_idx", "EFS_before_flg")
+    .group_by(["treatment", "trial_idx"])
+    .agg([
+        pl.mean("EFS_before_flg").alias("efs_mean"),        # proportion if 0/1
+        pl.len().alias("n"),                                # group size
+        pl.col("EFS_before_flg").cast(pl.Int8).sum().alias("n_efs")  # # of 1s
+    ])
+    .sort(["treatment", "trial_idx"])
+)
+
+# Smooth efs_mean with Gaussian kernel 
+SIGMA = 8
+efs_smoothed = (
+    efs_by_trt_trial
+    .group_by("treatment")
+    .map_groups(
+        lambda df: df.sort("trial_idx").with_columns(
+            pl.Series(
+                "efs_smooth",
+                gaussian_filter1d(df["efs_mean"].fill_null(0).to_numpy(), sigma=SIGMA)
+            )
+        )
+    )
+)
+
+idk = alt.Chart(efs_smoothed, width=800, height=800).mark_line().encode(
+    alt.X("trial_idx"),
+    alt.Y("efs_smooth"),
+    color="treatment"
+)
+idk.save("efs_by_trial_smoth.html")
+
+# =========================================
+# Bayesian Analysis
+# =========================================
 
 efs_model_cols = [
     "EFS_before_flg",
@@ -141,16 +198,17 @@ Comparison results:
 - Pareto K diagnostics are OK for both models 
 
 Conclusions: Use random intercept model as baseline for inference. 
+** Figure out what all of these mean and how they are calculated! 
 """
 
 # Compute probability of direction P(beta > 0 | data) 
-beta_ofc = (
-    idata_intercept.posterior["treatment"]
-    .sel(treatment_dim="ofc")
-    .stack(draw=("chain", "draw"))
-    .values
-)
+# How much of the OFC P density is above 0? 
+p_gt0_ofc = (idata_intercept.posterior.treatment.sel(treatment_dim="ofc") > 0).mean(("chain", "draw")).item()
+print(f"P(OFC mean > 0) = {p_gt0_ofc}")
 
+# How much of the mPFC P density is above 0? 
+p_gt0_mpfc = (idata_intercept.posterior.treatment.sel(treatment_dim="mpfc") > 0).mean(("chain", "draw")).item()
+print(f"P(mPFC mean > 0) = {p_gt0_mpfc}")
 """
 TODO: 
 - Figure out how to calculate probability of direction.
