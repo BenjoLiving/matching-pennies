@@ -87,3 +87,18 @@ def bin_data(
     return df.with_columns(
         (pl.col(bin_on) / bin_size).floor().cast(pl.Int64).alias(bin_col)   
     )
+
+
+def scale_col(df: pl.DataFrame, column: str, scaled_name: str = None):
+    if column not in df.columns:
+        raise ValueError(f"Column '{column}' not found in DataFrame") 
+    
+    if scaled_name == None: 
+        scaled_name = column + "_scaled"
+
+    return df.with_columns(
+        ((pl.col(column) - pl.col(column).min()) / 
+        (pl.col(column).max() - pl.col(column).min()))
+        .alias(scaled_name)
+    )
+
