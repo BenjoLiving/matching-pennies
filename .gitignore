@@ -17,6 +17,7 @@ data/*
 !data/README.md
 experiments/*
 !experiments/skeleton.toml
+future_features.txt
 
 # Editor & OS
 .vscode/
