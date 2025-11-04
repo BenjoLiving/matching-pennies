@@ -125,3 +125,31 @@ def line_by_treatment_across_bins(
         fig.update_layout(**extra_layout)
 
     return fig
+
+
+def plot_session_mean(
+    df: pl.DataFrame,
+    measure: str,
+    category_order: Dict,
+    group_on: Sequence[str] = ("treatment", "animal_id"),
+    **kwargs
+):
+    measure_df = (
+        df
+        .group_by(group_on)
+        .agg(
+            pl.mean(measure).alias(measure)
+        )
+    )
+
+    fig = px.violin(
+        measure_df,
+        x="treatment",
+        y=measure,
+        box=True,
+        points="all",
+        color="treatment",
+        category_orders=category_order,
+        **kwargs
+    )
+    fig.show()

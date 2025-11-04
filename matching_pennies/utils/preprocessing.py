@@ -4,7 +4,7 @@ from typing import Sequence
 def clip_to_minimum_extent(
     df: pl.DataFrame,
     column: str,
-    groupby: Sequence[str] = ("animal_id", "session"),
+    groupby: Sequence[str] = ("animal_id", "session_idx"),
 ) -> pl.DataFrame:
     """
     Clip a DataFrame so that all groups share a common maximum value 
