@@ -95,5 +95,5 @@ def ingest_experiment(config_path: str, overwrite: bool = False):
 if __name__ == "__main__":
     # Hardcode a default config path for convenience, or
     # parse sys.argv later if you want CLI flexibility.
-    CONFIG = "experiments/2018_ACC.toml"
+    CONFIG = "experiments/lesion_study.toml"
     ingest_experiment(CONFIG, overwrite=False)

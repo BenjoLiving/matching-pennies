@@ -102,3 +102,39 @@ def scale_col(df: pl.DataFrame, column: str, scaled_name: str = None):
         .alias(scaled_name)
     )
 
+
+def summarize_sessions(sdf: pl.DataFrame) -> pl.DataFrame:
+    """
+    Quick sanity checks for a session-level DataFrame.
+
+    Expected columns:
+        - 'animal_id'
+        - 'session_idx'
+        - 'NumTrials'
+    """
+    # Number of unique animals
+    n_animals = sdf.select(pl.col("animal_id").n_unique()).item()
+
+    # Minimum number of trials in any single session
+    min_trials_per_session = sdf.select(pl.col("NumTrials").min()).item()
+
+    # Sessions per animal (using unique session_idx per animal)
+    ses_per_animal = (
+        sdf
+        .group_by("animal_id")
+        .agg(n_sessions=pl.col("session_idx").n_unique())
+    )
+
+    min_sessions_per_animal = ses_per_animal.select(pl.col("n_sessions").min()).item()
+    max_sessions_per_animal = ses_per_animal.select(pl.col("n_sessions").max()).item()
+
+    # Return as a one-row summary table
+    summary = pl.DataFrame(
+        {
+            "n_animals": [n_animals],
+            "min_trials_per_session": [min_trials_per_session],
+            "min_sessions_per_animal": [min_sessions_per_animal],
+            "max_sessions_per_animal": [max_sessions_per_animal],
+        }
+    )
+    return summary
