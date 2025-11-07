@@ -14,6 +14,9 @@ df = csv_parser.build_trials(csvs, tmap, paradigm="normal")
 
 tdf, sdf = cpm.compute_metrics(df, keys=["animal_id", "session_idx"])
 
+mean_iti = tdf["InterTrialInterval"].mean()
+print(mean_iti)
+
 """
 TODO: 
 - Make sure python computed metrics are the same as matlab computed metrics

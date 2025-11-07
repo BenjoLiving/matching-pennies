@@ -292,21 +292,21 @@ def compute_trial_metrics(df: pl.DataFrame, *, keys: Sequence[str]) -> pl.DataFr
     ]
 
     # Base max over those three
-    prev_end_base = pl.max_horizontal(prev_three)
-
-    # Propagate null if ANY of the three is null (MATLAB max([a,b,c]) -> NaN when any NaN)
-    prev_end_expr = (
-        pl.when(pl.any_horizontal([e.is_null() for e in prev_three]))
-        .then(None)
-        .otherwise(prev_end_base)
-        .shift(1)                      # previous trial
-        .over(iti_keys)                # within same animal+session
-    )
+    trial_end = pl.max_horizontal(prev_three)
+    prev_end = trial_end.shift(1).over(iti_keys)
+    # # Propagate null if ANY of the three is null (MATLAB max([a,b,c]) -> NaN when any NaN)
+    # prev_end_expr = (
+    #     pl.when(pl.any_horizontal([e.is_null() for e in prev_three]))
+    #     .then(None)
+    #     .otherwise(prev_end_base)
+    #     .shift(1)                      # previous trial
+    #     .over(iti_keys)                # within same animal+session
+    # )
 
     if OP_ON in df_num.columns:
         # ITI = OP_ON - prev_end(k-1 in same session)
         out = out.with_columns(
-            (pl.col(OP_ON) - prev_end_expr).alias("InterTrialInterval")
+            (pl.col(OP_ON) - prev_end).alias("InterTrialInterval")
         ).with_columns(
             pl.when(pl.col("trial_idx") == 2)
             .then(None)
@@ -316,12 +316,12 @@ def compute_trial_metrics(df: pl.DataFrame, *, keys: Sequence[str]) -> pl.DataFr
 
     else:
         out = out.with_columns(pl.lit(None).alias("InterTrialInterval"))
-    out = out.with_columns([
-        pl.when(pl.col("_prev_err") == 0).then(pl.col("InterTrialInterval")).otherwise(None)
-          .alias("InterTrialInterval_afterWin"),
-        pl.when(pl.col("_prev_err") == 1).then(pl.col("InterTrialInterval")).otherwise(None)
-          .alias("InterTrialInterval_afterLose"),
-    ])
+        out = out.with_columns([
+            pl.when(pl.col("_prev_err") == 0).then(pl.col("InterTrialInterval")).otherwise(None)
+            .alias("InterTrialInterval_afterWin"),
+            pl.when(pl.col("_prev_err") == 1).then(pl.col("InterTrialInterval")).otherwise(None)
+            .alias("InterTrialInterval_afterLose"),
+         ])
 
     # Last reward flag
     out = out.with_columns(
