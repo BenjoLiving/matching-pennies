@@ -120,8 +120,8 @@ model_slope = bmb.Model(
     family="bernoulli"
 )
 
-idata_intercept = model_intercept.fit(idata_kwargs={"log_likelihood": True})
-idata_slope = model_slope.fit(idata_kwargs={"log_likelihood": True})
+idata_intercept = model_intercept.fit(idata_kwargs={"log_likelihood": True}, cores=1, chains=4)
+idata_slope = model_slope.fit(idata_kwargs={"log_likelihood": True}, cores=1, chains=4)
 
 print("===========================================")
 print("           RANDOM INTERCEPT MODEL") 
