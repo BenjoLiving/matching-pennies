@@ -1,12 +1,9 @@
-"""
-NOT FUNCTIONAL - Fix Later 
-"""
-
-
 # utils/plotting.py
 import polars as pl
 from typing import Sequence, Literal, Optional, Dict, Any 
 import plotly.express as px
+import matplotlib.pyplot as plt 
+import seaborn as sns
 
 YMode = Literal["fraction", "sum", "count", "mean"]
 
@@ -153,3 +150,75 @@ def plot_session_mean(
         **kwargs
     )
     fig.show()
+
+
+def plot_whitebar_strip(df_polars, y_col, treatment_col="treatment",
+                        order=("sham", "mpfc", "ofc"),
+                        ylabel="", xlabel="",
+                        figsize=(2, 4), fontsize=16):
+    """
+    Creates a white-bar barplot with black borders and stripplot overlays.
+    
+    Parameters
+    ----------
+    df_polars : Polars DataFrame
+        Input data containing at least treatment_col and y_col.
+    y_col : str
+        Column name to plot on the Y-axis.
+    treatment_col : str
+        Column name containing treatment groups.
+    order : list/tuple
+        Order of treatment groups.
+    figsize : tuple
+        Size of the matplotlib figure.
+    fontsize : int
+        Font size for axis labels and tick labels.
+        
+    Returns
+    -------
+    fig, ax : matplotlib Figure and Axes objects
+    """
+    
+    # Convert to pandas for seaborn
+    df = df_polars.to_pandas()
+    df[treatment_col] = df[treatment_col].astype(str)
+    
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Barplot (white bars)
+    sns.barplot(
+        data=df,
+        x=treatment_col,
+        y=y_col,
+        order=order,
+        ax=ax,
+        color="white",
+        errorbar="sd"
+    )
+
+    # Add black borders to bars
+    for patch in ax.patches:
+        patch.set_edgecolor("black")
+        patch.set_linewidth(1.5)
+
+    # Stripplot overlay
+    sns.stripplot(
+        data=df,
+        x=treatment_col,
+        y=y_col,
+        order=order,
+        ax=ax,
+        color="black",
+        jitter=0.15,
+        alpha=0.7,
+    )
+
+    # Labels and formatting
+    ax.set_ylabel(ylabel, fontsize=fontsize)
+    ax.set_xlabel(xlabel)
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right", fontsize=fontsize)
+
+    sns.despine()
+    plt.tight_layout()
+
+    return fig, ax
