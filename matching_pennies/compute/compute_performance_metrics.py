@@ -109,66 +109,121 @@ def _ensure_list_f64(df: pl.DataFrame, cols: Iterable[str]) -> pl.DataFrame:
     return df.with_columns(exprs) if exprs else df
 
 
-def _miller_madow_entropy_on_bin_seq(x_bits: np.ndarray, word_len: int) -> float:
+def _entropy_from_counts_expr(count_col: str) -> pl.Expr:
     """
-    Reproduce CompEntropyOnBinSeq(x, len) using the Miller-Madow correction,
-    as implemented in the MATLAB you provided.
+    Shannon entropy (in bits) of a discrete distribution defined by counts.
 
-    x_bits: 1D array-like of binary values (0/1 or 'L'/'R' already mapped to 0/1)
-    word_len: int, length of consecutive elements to group
+    H_ml = -sum_i p_i log2(p_i), with p_i = count_i / sum(count_i).
+
+    Intended to be used inside group_by(...).agg([...]).
     """
+    counts = pl.col(count_col).cast(pl.Float64)
+    probs = counts / counts.sum()
+    # log2(p) = log(p) / log(2)
+    return -(probs * (probs.log() / np.log(2.0))).sum()
 
-    # 1. ensure column vector of 0/1 ints
-    x = np.asarray(x_bits).reshape(-1)
-    # if values aren't 0/1 (e.g. "L"/"R"), map to categorical 0/1
-    if x.dtype.kind in ("U", "S", "O"):  # strings/objects
-        # make categories, like grp2idx()-1 in MATLAB
-        _, inv = np.unique(x, return_inverse=True)
-        x = inv  # starts at 0
-    else:
-        # force to ints and reindex to 0,1 if needed
-        cats, inv = np.unique(x, return_inverse=True)
-        # sanity check: MATLAB errors if >2 levels
-        if len(cats) > 2:
-            raise ValueError(
-                "Input has more than 2 unique levels; expected a binary sequence."
-            )
-        x = inv  # map to 0..num_levels-1
 
-    n = x.shape[0]
+def _binary_word_entropy_per_session(
+    trials: pl.DataFrame,
+    *,
+    keys: Sequence[str],
+    col: str,
+    word_len: int,
+    out_name: str = "ChoiceWordEntropy",
+) -> pl.DataFrame:
+    """
+    Miller–Madow-corrected word entropy per session for a binary sequence.
 
-    # 2. truncate so length is divisible by word_len
-    n_trunc = n - (n % word_len)
-    if n_trunc == 0:
-        return np.nan  # not enough data to form even one word
+    - `keys` define a session (e.g. ("animal_id", "session_idx")).
+    - `col` is the binary outcome column (e.g. "well_id" with two values).
+    - `word_len` is the non-overlapping word length.
+    - Assumes the alphabet is binary, so k = 2^word_len.
 
-    x_trunc = x[:n_trunc]
+    Returns a DataFrame with columns `[*keys, out_name]`.
+    """
+    keys = list(keys)
 
-    # 3. "deal into m x len vec" (MATLAB loop building xm)
-    # effectively: xm[k, :] = x[k : n_trunc : word_len]
-    # shape = (word_len, n_trunc/word_len)
-    xm = np.vstack([x_trunc[k::word_len] for k in range(word_len)])
+    # Use only trials with a defined choice
+    df = trials.filter(pl.col(col).is_not_null())
 
-    # 4. each column of xm is a binary word; convert to decimal
-    # e.g. column [1,0,1] -> "1 0 1" -> bin 101 -> dec 5
-    # We'll interpret xm rows as successive time points k=0..len-1,
-    # so the first row is the first bit. To match MATLAB num2str+bin2dec,
-    # row 0 is most significant bit.
-    powers = 2 ** np.arange(word_len - 1, -1, -1)  # e.g. [4,2,1] for len=3
-    x_dec = (xm.T * powers).sum(axis=1)
+    # If no data at all, just return null entropy per session
+    if df.is_empty():
+        return (
+            trials.group_by(keys)
+            .agg(pl.lit(None).cast(pl.Float64).alias(out_name))
+        )
 
-    # 5. empirical (maximum likelihood) entropy of x_dec, in bits
-    vals, counts = np.unique(x_dec, return_counts=True)
-    p = counts / counts.sum()
-    H_ml = -(p * np.log2(p)).sum()
+    # Row index per session (implicitly defines temporal order within session)
+    df = df.with_columns(
+        pl.int_range(0, pl.count()).over(keys).alias("_row")
+    )
 
-    # 6. Miller-Madow style correction they used:
-    # E = E + (k-1)/(1.3863 * length(x))
-    # where k = 2^len, and length(x) is ORIGINAL n, not n_trunc.
-    k = 2 ** word_len
-    E_mm = H_ml + (k - 1) / (1.3863 * n)
+    # Word index and position within the word
+    df = df.with_columns([
+        (pl.col("_row") // word_len).alias("_word_idx"),
+        (pl.col("_row") % word_len).alias("_row_in_word"),
+    ])
 
-    return float(E_mm)
+    # Build words as ordered lists per (session, word_idx)
+    words = (
+        df
+        .group_by(keys + ["_word_idx"])
+        .agg(
+            pl.col(col)
+              .sort_by("_row_in_word")   # ensure correct within-word order
+              .alias("_word")
+        )
+        # Keep only complete words of length `word_len`
+        .filter(pl.col("_word").list.len() == word_len)
+    )
+
+    # If no complete words exist, return null entropy per session
+    if words.is_empty():
+        return (
+            trials.group_by(keys)
+            .agg(pl.lit(None).cast(pl.Float64).alias(out_name))
+        )
+
+    # Count occurrences of each word pattern per session
+    word_counts = (
+        words
+        .group_by(keys + ["_word"])
+        .agg(pl.len().alias("count"))
+    )
+
+    # Maximum-likelihood entropy per session (in bits)
+    entropy_ml = (
+        word_counts
+        .group_by(keys)
+        .agg(
+            _entropy_from_counts_expr("count").alias("_H_ml")
+        )
+    )
+
+    # Number of samples n per session (original sequence length, like MATLAB)
+    n_df = (
+        df.group_by(keys)
+          .agg(pl.count().alias("_n_samples"))
+    )
+
+    # Miller–Madow correction: H_mm = H_ml + (k - 1) / (n * ln(2))
+    k = float(2 ** word_len)
+    ln2 = np.log(2.0)
+
+    entropy_mm = (
+        entropy_ml
+        .join(n_df, on=keys, how="left")
+        .with_columns(
+            (
+                pl.col("_H_ml")
+                + (k - 1) / (ln2 * pl.col("_n_samples").cast(pl.Float64))
+            ).alias(out_name)
+        )
+        .select(keys + [out_name])
+    )
+
+    return entropy_mm
+
 
 
 def compute_trial_metrics(df: pl.DataFrame, *, keys: Sequence[str]) -> pl.DataFrame:
@@ -475,82 +530,6 @@ def compute_trial_metrics(df: pl.DataFrame, *, keys: Sequence[str]) -> pl.DataFr
     return out.drop(helpers)
 
 
-
-# def compute_session_metrics(
-#     trials_with_metrics: pl.DataFrame,
-#     *,
-#     keys: Sequence[str],
-# ) -> pl.DataFrame:
-#     """
-#     Aggregate trial‑level metrics down to one row per session.
-
-#     Parameters
-#     ----------
-#     trials_with_metrics : polars.DataFrame
-#         A dataframe containing trial‑level metrics produced by
-#         `compute_trial_metrics`.
-#     keys : Sequence[str]
-#         Columns that uniquely identify a session (e.g. ``("animal_id",
-#         "session_idx")``).  Aggregation is performed per group of
-#         ``keys``.
-
-#     Returns
-#     -------
-#     polars.DataFrame
-#         One row per session with aggregated metrics.
-#     """
-#     # Determine a zero‑based index within each session.  We use
-#     # ``pl.int_range`` combined with ``pl.count`` to generate a 0,1,2…
-#     # sequence per group.  This avoids the `pl.cum_count()` call which
-#     # requires a column argument in newer Polars versions.
-#     row_idx = pl.int_range(0, pl.count()).over(keys).alias("_row")
-
-#     # Indicator for choosing the right well ("R")
-#     is_R = (pl.col(WELL) == pl.lit("R")).cast(pl.Float64).alias("_isR")
-
-#     # Trial rewarded indicator – true if either reward timestamp is
-#     # non‑null.  Cast to float for aggregation.
-#     rewarded = (pl.col(L_REW).is_not_null() | pl.col(R_REW).is_not_null()).cast(pl.Float64).alias("_rew")
-
-#     # Prepare the frame with helper columns.  The helpers are needed
-#     # only for aggregation; they will not be present in the final frame.
-#     data = trials_with_metrics.with_columns([
-#         row_idx,
-#         is_R,
-#         rewarded,
-#         # robust numeric versions for correctness flags
-#         pl.col("wrong_choice_flg").cast(pl.Float64, strict=False).alias("_wcf"),
-#         pl.col(ERR).cast(pl.Float64, strict=False).alias("_errf"),
-#     ])
-
-#     # Perform groupby aggregation.  Each metric is computed per group of
-#     # ``keys``.  Note that metrics involving the first trial exclude
-#     # the first row using the helper ``_row``.
-#     # Prefer MATLAB semantics for percent-correct: use Wrong_choice_flg if available;
-#     # otherwise fall back to 1 - error_flg.
-#     pct_correct = (
-#         pl.when(pl.col("_wcf").is_not_null())
-#         .then(1 - pl.col("_wcf"))
-#         .otherwise(1 - pl.col("_errf"))
-#     )
-
-#     agg = (
-#         data.group_by(list(keys)).agg([
-#             pl.count().alias("NumTrials"),
-#             pct_correct.mean().alias("PercentCorrectChoice"),
-#             pl.col("_rew").mean().alias("MeanRewardsPerTrial"),
-#             # Probability of choosing R, excluding the first trial
-#             pl.col("_isR").filter(pl.col("_row") > 0).mean().alias("ProbR"),
-#             # Mean of win/lose stay/switch flags.  Cast to float to avoid
-#             # null propagation issues; Polars will treat nulls correctly
-#             pl.col("WSLS_flg").cast(pl.Float64).mean().alias("ProbWSLS"),
-#             pl.col("WinStay_flg").cast(pl.Float64).mean().alias("ProbWinStay"),
-#             pl.col("LoseSwitch_flg").cast(pl.Float64).mean().alias("ProbLoseSwitch"),
-#             pl.col("LoseStay_flg").cast(pl.Float64).mean().alias("ProbLoseStay"),
-#         ])
-#     )
-#     return agg
-
 def compute_session_metrics(
     trials_with_metrics: pl.DataFrame,
     *,
@@ -582,6 +561,15 @@ def compute_session_metrics(
     R_REW = "R_reward_ts"
     ERR = "error_flg"
 
+    # Word-based Miller–Madow entropy over binary well choices per session
+    word_entropy_df = _binary_word_entropy_per_session(
+        trials_with_metrics,
+        keys=keys,
+        col=WELL,
+        word_len=entropy_word_len,
+        out_name="ChoiceWordEntropy",
+    )
+
     # row index within session (0,1,2,...) for first-trial exclusions
     row_idx = pl.int_range(0, pl.count()).over(keys).alias("_row")
 
@@ -589,8 +577,13 @@ def compute_session_metrics(
     is_R = (pl.col(WELL) == pl.lit("R")).cast(pl.Float64).alias("_isR")
 
     # did choice repeat from previous trial?
+    # same_as_last = (
+    #     (pl.col("choices") == pl.col("choices").shift(1).over(keys))
+    #     .cast(pl.Float64)
+    #     .alias("_same_as_last")
+    # )
     same_as_last = (
-        (pl.col("choices") == pl.col("choices").shift(1).over(keys))
+        (pl.col("well_id") == pl.col("well_id").shift(1).over(keys))
         .cast(pl.Float64)
         .alias("_same_as_last")
     )
@@ -657,7 +650,9 @@ def compute_session_metrics(
         ])
     )
 
-    return agg
+    # Join in Miller–Madow word entropy per session
+    session_metrics = agg.join(word_entropy_df, on=list(keys), how="left")
+    return session_metrics
 
 
 
