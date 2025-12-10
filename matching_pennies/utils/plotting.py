@@ -155,6 +155,7 @@ def plot_session_mean(
 def plot_whitebar_strip(df_polars, y_col, treatment_col="treatment",
                         order=("sham", "mpfc", "ofc"),
                         ylabel="", xlabel="",
+                        hue=None,
                         figsize=(2, 4), fontsize=16):
     """
     Creates a white-bar barplot with black borders and stripplot overlays.
@@ -193,7 +194,8 @@ def plot_whitebar_strip(df_polars, y_col, treatment_col="treatment",
         order=order,
         ax=ax,
         color="white",
-        errorbar="sd"
+        errorbar="sd",
+        hue=hue,
     )
 
     # Add black borders to bars
